@@ -1,6 +1,8 @@
 # "On This Day": Informational R Shiny App
 
-This project was created to showcase information from a variety of public APIs integreated through a Shiny app in R. App users are prompted to input a date and are subsequently presented with an assortment of information about that date in time. The app aims to inform users on what may have happened that day in a casual and visually appealing way. A live version of the application (as well as further information on the APIs used and app-building process) can be found in the associated R-markdown.
+Martin Olarte, Enzo Mescall, Miles King, and Christina Liang
+
+This project was created to showcase information from a variety of public APIs integreated through a Shiny app in R. App users are prompted to input a date and are subsequently presented with an assortment of information about that date in time. The app aims to inform users on what may have happened that day in a casual and visually appealing way. A live version of the application (as well as further information on the APIs used and app-building process) can be found [here](https://milesfking.shinyapps.io/the-app/) or in the associated R-markdown.
 
 ## Featured APIs
 This information is pulled from APIs and is categorized based on its content (Astrology, News, Sports, etc.). The APIs that are utilized are as follows:
