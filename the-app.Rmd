@@ -1,0 +1,439 @@
+----
+title: "On This Day: R Shiny Project"
+output: html_document
+author:
+- Miles King
+runtime: shiny
+---
+
+## Setup
+
+```{r setup, include = FALSE}
+library(tidyverse)
+library(shiny)
+library(httr)
+```
+
+# Introduction
+
+This project was created to showcase information from a variety of public APIs integreated through a Shiny app. In the app, a user is prompted to input a date and is subsequently presented with an assortment of information about that date in time. This information is pulled from APIs and is categorized based on its content (Astrology, News, Sports, etc.). The APIs that are utilized are as follows:
+  - The NASA API
+  - The New York Times API
+  - The NBA API
+  - The Random Fact API
+
+# Successful APIs
+
+## "Ball Don't Lie": NBA Scores API:
+
+The "Ball Don't Lie" NBA API returns NBA box scores for a particular date. This is an unofficial NBA API, but we opted to use it as it is a free API that doesn't require a key to authorize requests. The JSON list returned includes game scores, who the home team was, and who the away team was. Our goal for this component of the project was to output a nicely formatted list of all of the scores, color-coded to make it clear who the winner and loser of each individual game was. We accomplished this by outputting text using the `fluidRows()` method similar to the UI output that was used to output the example links in the shell of the NYT Shiny app. This was ultimately successful in outputting the scores in an simple, comprehensible, and visually appealing manner using HTML elements to provide additional formatting.
+
+```{r}
+# No API key required 
+
+get_nba_games = function(year, month, day) {
+  # takes base URL and append the date
+  base_url = "https://www.balldontlie.io/api/v1/games?"
+  if (day < 10) day = paste0("0", day)
+  if (month < 10) month = paste0("0", month)
+  date = paste(year, month, day, sep = "-")  
+  NBA_url = paste0(
+    base_url,
+    paste0("dates[]=", date)
+  )
+  
+  # return NBA JSON file
+  NBA_json = jsonlite::read_json(NBA_url)[[1]]
+  return(NBA_json)
+}
+```
+
+## NASA API:
+
+Using the free NASA API, we focused specifically on the "Astronomy Picture of the Day" that NASA chooses. We were able to retrieve historical images and explanations for a user-inputted date using the `get_nasa_photos()` function The JSON returned by the function is easy to navigate as the list elements are clearly labeled `url` and `explanation`, and we integrated it into the Shiny app via HTML.
+
+```{r}
+NASA_key = "jlGOnZLwsTLhtxbcgWjUwOdvXEHBgt9Tpw1HgTGq"
+
+get_nasa_photos = function(year, month, day, api_key) {
+  # takes base URL and appends the date
+  base_url = paste0("https://api.nasa.gov/planetary/apod?api_key=", api_key)
+  if (day < 10) day = paste0("0", day)
+  if (month < 10) month = paste0("0", month)
+  date = paste(year, month, day, sep = "-")  
+  NASA_url = paste(
+    base_url,
+    paste0("date=", date),
+    sep = "&"
+  )
+  
+  # returns a JSON
+  NASA_json = jsonlite::read_json(NASA_url)
+}
+```
+
+## NYT API:
+
+The main panel contains a neatly organized and well formatted list of front page NY Times headlines for the specified date, where the number of links is determined by the number of hits. The user is able to click on any of the headlines and immediately a modal dialog box pop up that contains the headline in the title section, the byline and lead paragraph in the body, and a working link to the full article on nytimes.com as the footer. The code incorporates HTML to make sure the printing was neatly formatted and the link to the article would work properly and open a new tab outside of the shiny app since that was not working. 
+
+The dialog box also includes the first image available in the JSON. First we unnested the original JSON to be able to access the image urls, which we had to paste with the initial part of the link ("https://static01.nyt.com/") that was not in the JSON, and then we included an image tag in HTML within the modal dialog box with proportional width and height to make sure the image kept its aspect ratio. Finally, there are various aesthetically pleasing elements included to make sure the app looks elegant, and some user-friendly elements that made the shiny app more readable.
+
+```{r}
+NYT_key = "ZpkPqA7UdZuj0XLQUHxKIBucmej1x71C"
+
+get_nyt_articles = function(year, month, day, api_key) {
+  
+  # takes base URL and appends the date
+  base_url <- "https://api.nytimes.com/svc/search/v2/articlesearch.json?begin_date=yearmonthday&end_date=yearmonthday&fq=document_type:(article) AND print_page:(1) AND print_section:(A)&api-key=apikey&page=page_number"
+  yearmonthday = paste(year, month, day, sep = "")
+  year_url <- gsub("yearmonthday", yearmonthday, base_url)
+  
+  # appends API key to URL
+  search_url <- gsub("apikey", api_key, year_url)
+  
+  
+  # initialize dataframe to return
+  nyt_df = tibble()
+  # initialize page number as zero
+  page_number = 0
+  
+  # iterate over all pages of articles
+  # read in URL for page=0 as a JSON
+  full_url = gsub("page_number", page_number, search_url)
+  nyt_json = jsonlite::read_json(full_url)
+  # count the number of hits
+  metadata = tibble(nyt_json)[3,] %>%
+    hoist(nyt_json, "meta") %>%
+    hoist(meta, "hits")
+  hits = metadata[[1, 1]]
+  # if there are no hits, break from the loop gracefully
+  if (hits == 0) {
+    return(nyt_df) # by breaking, our dataframe will just be empty 
+  }
+    
+  # otherwise, loop over all pages of articles using a repeat loop
+  repeat {
+    # pull full URL (with page number), read it in as a JSON
+    if (page_number > 0) { # since we did this for page = 0 above, only re-load this on subsequent page numbers
+      full_url = gsub("page_number", page_number, search_url)
+      nyt_json = jsonlite::read_json(full_url)
+    }
+    
+    # if there are hits, fetch the complete article data and append to nyt_df
+    articles = tibble(nyt_json)[3,] %>%
+    hoist(nyt_json, "docs") %>%
+    # unnest longer so that dataframe is tidy: each row is a distinct article
+    unnest_longer(docs) %>%
+    select(docs)
+    
+    # append the data from this page to the data that has already been scraped
+    nyt_df = rbind(nyt_df, articles)
+    
+    # when we reach the end of the list of articles, break from the loop
+    if (page_number == ceiling(hits/10) - 1) {
+      break
+    }
+    
+    # increment page and cool for 5.5 seconds when it is necessary
+    page_number = page_number + 1
+      Sys.sleep(5.5)
+  }
+  
+  # CLEAN THE DATA
+  # if the query returned data, flatten it with hoist
+  nyt_df <- nyt_df %>%
+  hoist(docs,
+        headline = "headline",
+        byline = "byline",
+        web_url = "web_url",
+        lead_paragraph = "lead_paragraph",
+        source = "source",
+        word_count = "word_count",
+        multimedia = "multimedia") %>%
+  hoist(headline,
+        main_headline = "main") %>%
+  hoist(byline,
+        authors = "original") %>%
+  select(main_headline, authors, web_url, lead_paragraph, source, word_count, multimedia) %>%
+  arrange(main_headline)
+  
+  # grab the first image from multimedia (if it exists)
+  if (!all(is.na(nyt_df$multimedia))) {
+        nyt_images <- nyt_df %>%
+          unnest_longer(multimedia) %>%
+          hoist(multimedia, url = "url") %>%
+          group_by(main_headline)
+        
+        if ("url" %in% colnames(nyt_images)) {
+          nyt_df <- nyt_images %>%
+            summarise(img_url = url[1]) %>%
+            merge(nyt_df, by="main_headline") %>%
+            select(main_headline, authors, web_url, lead_paragraph, source, word_count, img_url)
+        }
+  }
+  
+  
+  # return the cleaned data
+  return(nyt_df)
+}
+
+get_nyt_articles("2020", "08", "30", NYT_key)
+```
+
+
+
+
+## Numbers API:
+
+Finally, we implemented the Numbers API, an API that returns a random fact about a specified day. We stumbled upon the Numbers API after running into various issues with some of the APIs on our initial list, and we decided that random facts are perfectly in line with the goal of our Shiny app (which, again, is to provide random information about any date in history). The `get_facts` function returns a string with the fact, which we output as text in our Shiny app.
+
+```{r}
+get_facts = function(month, day) {
+  # appends date to the end of the URL
+  url <- paste0("https://numbersapi.p.rapidapi.com/", month, "/", day, "/date")
+  
+  queryString <- list(
+    fragment = "true",
+    json = "true"
+  )
+  
+  # queries the Numbers API for a random fact
+  response <- VERB("GET", url, add_headers('X-RapidAPI-Host' = 'numbersapi.p.rapidapi.com', 'X-RapidAPI-Key' = 'e535e8030cmsh436e37ef1f84ea0p17197ajsn2c62aa42adca'), query = queryString, content_type("application/octet-stream"))
+  
+  # formats and returns a fact if one is found
+  numbers_json <- content(response)
+  if (numbers_json$found[1]) {
+    ret <- paste0("On this date, in the year ", numbers_json$year[1], ": ", numbers_json$text)
+  }
+  return(ret)
+}
+```
+
+
+# Implementing the Shiny App
+
+To tie all of our APIs together, we built a Shiny app to display all of the information about a specific date in a visually appealing manner. Similar to the NYT Shiny app, we included a sidebar for the user to input a date, as well as a button to launch the search. In the main panel, we separated results into 4 primary tabs, labeled "Astronomy", "News", "NBA", and "Random Fact", with a unique API belonging to each tab. If we had been able to access more of the APIs on our list, we would have separated the tabs into less specific categories (i.e. "News", "Sports", "Entertainment", "Words") and implemented multiple APIs into one output. For instance, the IMDB and Spotify APIs could have been seamlessly integrated into the Entertainment tab, and from there separated by headers or modalDialogues to distinguish the two sets of results.
+
+Depending on the API, we displayed the data in varying formats. For the NYT data, for instance, we opted for links that could be clicked to provide more information. However, for the NBA dataset, links were mostly unnecessary as there wasn't much information to provide beyond the score, date and teams of a particular game. As a result, we just outputted text.
+
+```{r}
+shinyApp(
+  
+  ui = fluidPage(
+    titlePanel(h1("On This Date", align = "center")),
+    sidebarLayout(
+      sidebarPanel(
+        h3("Select a Day:", align = "center"),
+        dateInput("date", "Input date", value = Sys.Date(), min = "1980-01-01", max = Sys.Date()),
+        actionButton("search", "Discover Cool Things", class = "btn btn-primary", style='padding:4px; font-size:120%')
+      ),
+      mainPanel(
+        tabsetPanel(
+        tabPanel("Astronomy", 
+                 h3("Astronomy Picture of the Day"),
+                 htmlOutput("nasa_link")),
+        tabPanel("News",
+                 h3("Front Page of the New York Times"),
+                 h5("Click on an article title to learn more"),
+                 uiOutput("links")),
+        tabPanel("NBA",
+                 h3("Today's NBA Box Scores"),
+                 uiOutput("scores")),
+        tabPanel("History",
+                 h3("Historical Fact"),
+                 textOutput("random_phrase")),
+        )
+      )
+    )
+  ),
+  server = function(input, output, session) {
+    
+    observeEvent(input$search, {
+      fact = get_facts(as.numeric(str_sub(input$date, 6, 7)), 
+                                                  as.numeric(str_sub(input$date, 9, 10)))
+      output$random_phrase = renderText(fact)
+    })
+    
+    output$edit_keys = renderUI({
+      conditionalPanel("input.edit", textInput("nyt_key", "NYT Key", value = "ZpkPqA7UdZuj0XLQUHxKIBucmej1x71C"))
+      })
+    
+    # NASA STUFF
+    observeEvent(input$search, {
+      
+      # calling nasa function and saving the json
+      # str_sub breaks apart data input into year, month, day
+      nasa = get_nasa_photos(as.numeric(str_sub(input$date, 1, 4)),
+                             as.numeric(str_sub(input$date, 6, 7)),
+                             as.numeric(str_sub(input$date, 9, 10)),
+                             NASA_key)
+      
+      
+      output$nasa_link = renderUI({
+        #img(src=nasa$url, width="500", height="600")
+        HTML(paste0(
+          "<img src=",nasa$url," width='80%', height='80%'>",
+          "<br>",
+          "<h4>", '"', nasa$title, '"', "</h4>",
+          #"<p><small>", "Copyright: ", nasa$copyright, "</small></p>",
+          "<p>", nasa$explanation, "</p>"
+          ))
+      })
+    })
+    
+    
+    # NYT copied from midterm
+    
+    state = reactiveValues(
+      observers = list()
+    )
+    
+    observeEvent(input$search, {
+      
+      # destroy existing observers (carried over from example code)
+      for(i in seq_along(state$observers)) {
+        state$observers[[i]]$destroy()
+      }
+      
+      # calling function from task 2 with given inputs
+      # str_sub breaks apart data input into year, month, day
+      nyt = get_nyt_articles(str_sub(input$date, 1, 4),
+                       str_sub(input$date, 6, 7),
+                       str_sub(input$date, 9, 10),
+                       NYT_key)
+      
+      # loop to iterate over all entries in nyt (rather than an "i" specified in the UI)
+      ui_elems = map(
+        seq_len(nrow(nyt)), 
+        function(i) 
+          fluidRow(actionLink(paste0("link",i), paste0(nyt[i,1]))) # changed to paste the title nyt[i,1] rather than the article number
+      )
+      
+      output$links = renderUI({
+        validate(need(nrow(nyt) > 0, "No articles found for the given parameters."))
+        fluidPage(ui_elems)
+        })
+      
+      # reset and create new observers for each of our links
+      state$observers = map(
+        seq_len(nrow(nyt)), 
+        function(i) {
+          label = paste0("link",i)
+          observeEvent(input[[label]], ignoreInit = TRUE, {
+            # for articles with images, link to the image in an HTML tag
+            img_html = ""
+            if ("img_url" %in% colnames(nyt)) { #
+              if (!is.na(nyt$img_url)) {
+                img_html = paste0('<p style="text-align:center;"><img
+                           src="https://static01.nyt.com/',nyt$img_url[i],'"
+                           width="80%"
+                           height="80%">
+                           </p>')
+              }
+            }
+    
+            showModal(modalDialog(
+               title = paste(nyt[i,1]),
+               HTML(paste(nyt[i,2],
+                      paste("Lead paragraph:", nyt[i,4]),
+                      img_html,
+                      paste("<p><small>",
+                            "Sourced from", nyt[i, 5], "<br>",
+                            nyt[i, 6], "words",
+                            "</small></p>"),
+                      sep = "<br><br>")),
+               #div(paste(nyt[i, 6], "words"), style="font-size:60%"),
+               footer = tagList(
+                 # figuring out how to embed a link in the modal footer: https://shiny.rstudio.com/articles/tag-glossary.html
+                 # button for the link: https://stackoverflow.com/questions/37795760/r-shiny-add-weblink-to-actionbutton
+  
+                 actionButton(inputId='read', label="Read Article",
+                              class = "btn btn-primary",
+                              icon = icon("th"), 
+                              onclick = paste0("window.open('", nyt[[i, 3]],  "', '_blank')")),
+                 
+                 modalButton("Return")
+                 )
+               ))
+          })
+          }
+        )
+    })
+    
+    
+    
+    
+    
+    
+    
+    observeEvent(input$search, {
+      yr <- as.numeric(str_sub(input$date, 1, 4))
+      mth <- as.numeric(str_sub(input$date, 6, 7))
+      dia <- as.numeric(str_sub(input$date, 9, 10))
+      
+      # Call function to get article data for the specified date
+      nba <- get_nba_games(yr, mth, dia)
+      
+      # Destroy existing observers
+      for(i in seq_along(state$nba_observers)) {
+        state$nba_observers[[i]]$destroy()
+      }
+      
+      # Map of links and article headlines
+      ui_elems = map(
+        seq_len(length(nba)), 
+        function(i) {
+          colorh=""
+          colorv=""
+          if (nba[[i]]$visitor_team_score > nba[[i]]$home_team_score) {
+            colorv = "green"
+            colorh = "red"
+          }
+          if (nba[[i]]$home_team_score > nba[[i]]$visitor_team_score) {
+            colorh = "green"
+            colorv = "red"
+          }
+          fluidRow(column(12, align="left", 
+                          HTML(paste("<h5>",
+                                     nba[[i]]$visitor_team$full_name,
+                                     '<span style="color:',colorv,'">',
+                                     nba[[i]]$visitor_team_score,
+                                     "</span>",
+                                     "<br>",
+                                     "</span>",
+                                     nba[[i]]$home_team$full_name,
+                                     '<span style="color:',colorh,'">',
+                                     nba[[i]]$home_team_score,
+                                     "</h5>",
+                                     "<br>"
+                          ))))
+        }
+      )
+      
+      # Validate input and then return fluidpage
+      output$scores = renderUI({
+        validate(need(nrow(nba) > 0, "No scores to display for this date."))
+        fluidPage(ui_elems)
+        })
+      
+    })
+    
+    
+    
+    
+    
+    
+  })
+```
+
+
+# Conclusions
+
+In undertaking this project, we underestimated how difficult it would be to interact with a large number of APIs simultaneously. While the implementation on the Shiny app was not necessarily difficult, we learned that one API often looks very different from another. For instance, in just the APIs that we tested alone, we found that
+1. Some APIs require keys and some don't
+2. Some APIs provide chronological data and some don't
+3. Some APIs are free and some are paid
+4. Some APIs have robust documentation and some do not
+5. Some APIs include vast amounts of information and some are much more simplistic
+
+If given the chance to work further on the project, we would (obviously) aim to implement more functional APIs into our app. There are thousands of working APIs out there, so we would likely look to backup APIs for the ones that we could not get to work. For example, there are free APIs with flights and weather data, so that would be a good way to circumvent the paywall barrier of the Open Weather Map and Skyscanner APIs. We would also want to make our Shiny app outputs a little more crowded (by thinking about a way to split tabs more generally) and more aesthetically pleasing by adding more images and "fun" elements. Our app is obviously not incredibly serious (we wanted, for instance, to return all of Elon's tweets on a gievn day), and we wanted our app to reflect the fun nature of random facts from any given day.
